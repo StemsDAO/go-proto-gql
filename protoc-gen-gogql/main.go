@@ -20,15 +20,15 @@ func main() {
 	protogen.Options{ParamFunc: func(name, value string) error {
 		switch name {
 		case "svc":
-			if b, err := strconv.ParseBool(value); err != nil {
+			if b, err := strconv.ParseBool(value); err == nil {
 				*svc = b
 			}
 		case "svc_prefix":
-			if b, err := strconv.ParseBool(value); err != nil {
+			if b, err := strconv.ParseBool(value); err == nil {
 				*svcMethodPrefix = b
 			}
 		case "merge":
-			if b, err := strconv.ParseBool(value); err != nil {
+			if b, err := strconv.ParseBool(value); err == nil {
 				*merge = b
 			}
 		}
