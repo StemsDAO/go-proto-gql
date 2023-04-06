@@ -48,6 +48,7 @@ func main() {
 
 func generate(req *pluginpb.CodeGeneratorRequest) (outFiles []*pluginpb.CodeGeneratorResponse_File, err error) {
 	var genServiceDesc bool
+	var genServiceMethodPrefix bool = true
 	var merge bool
 	var extension = generator.DefaultExtension
 	for _, param := range strings.Split(req.GetParameter(), ",") {
@@ -58,6 +59,10 @@ func generate(req *pluginpb.CodeGeneratorRequest) (outFiles []*pluginpb.CodeGene
 		switch param {
 		case "svc":
 			if genServiceDesc, err = strconv.ParseBool(value); err != nil {
+				return nil, err
+			}
+		case "svc_prefix":
+			if genServiceMethodPrefix, err = strconv.ParseBool(value); err != nil {
 				return nil, err
 			}
 		case "merge":
@@ -77,7 +82,7 @@ func generate(req *pluginpb.CodeGeneratorRequest) (outFiles []*pluginpb.CodeGene
 		return nil, err
 	}
 
-	gqlDesc, err := generator.NewSchemas(descs, merge, genServiceDesc, p)
+	gqlDesc, err := generator.NewSchemas(descs, merge, genServiceDesc, genServiceMethodPrefix, p)
 	if err != nil {
 		return nil, err
 	}

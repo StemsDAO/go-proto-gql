@@ -25,7 +25,11 @@ const (
 	DefaultExtension = "graphql"
 )
 
-func NewSchemas(descs []*desc.FileDescriptor, mergeSchemas, genServiceDesc bool, plugin *protogen.Plugin) (schemas SchemaDescriptorList, err error) {
+func NewSchemas(
+	descs []*desc.FileDescriptor,
+	mergeSchemas, genServiceDesc, genServiceMethodPrefixes bool,
+	plugin *protogen.Plugin,
+) (schemas SchemaDescriptorList, err error) {
 	var files []*descriptor.FileDescriptorProto
 	for _, d := range descs {
 		files = append(files, d.AsFileDescriptorProto())
@@ -39,7 +43,7 @@ func NewSchemas(descs []*desc.FileDescriptor, mergeSchemas, genServiceDesc bool,
 	}
 
 	if mergeSchemas {
-		schema := NewSchemaDescriptor(genServiceDesc, goref)
+		schema := NewSchemaDescriptor(genServiceDesc, genServiceMethodPrefixes, goref)
 		for _, file := range descs {
 			err := generateFile(file, schema)
 			if err != nil {
@@ -51,7 +55,7 @@ func NewSchemas(descs []*desc.FileDescriptor, mergeSchemas, genServiceDesc bool,
 	}
 
 	for _, file := range descs {
-		schema := NewSchemaDescriptor(genServiceDesc, goref)
+		schema := NewSchemaDescriptor(genServiceDesc, genServiceMethodPrefixes, goref)
 		err := generateFile(file, schema)
 		if err != nil {
 			return nil, err
@@ -126,13 +130,18 @@ func (s SchemaDescriptorList) GetForDescriptor(file *protogen.File) *SchemaDescr
 	return nil
 }
 
-func NewSchemaDescriptor(genServiceDesc bool, goref GoRef) *SchemaDescriptor {
+func NewSchemaDescriptor(
+	genServiceDesc bool,
+	genServiceMethodPrefixes bool,
+	goref GoRef,
+) *SchemaDescriptor {
 	sd := &SchemaDescriptor{
-		Directives:                 map[string]*ast.DirectiveDefinition{},
-		reservedNames:              map[string]desc.Descriptor{},
-		createdObjects:             map[createdObjectKey]*ObjectDescriptor{},
-		generateServiceDescriptors: genServiceDesc,
-		goRef:                      goref,
+		Directives:                    map[string]*ast.DirectiveDefinition{},
+		reservedNames:                 map[string]desc.Descriptor{},
+		createdObjects:                map[createdObjectKey]*ObjectDescriptor{},
+		generateServiceDescriptors:    genServiceDesc,
+		generateServiceMethodPrefixes: genServiceMethodPrefixes,
+		goRef:                         goref,
 	}
 	for _, name := range graphqlReservedNames {
 		sd.reservedNames[name] = nil
@@ -155,7 +164,8 @@ type SchemaDescriptor struct {
 	reservedNames  map[string]desc.Descriptor
 	createdObjects map[createdObjectKey]*ObjectDescriptor
 
-	generateServiceDescriptors bool
+	generateServiceDescriptors    bool
+	generateServiceMethodPrefixes bool
 
 	goRef GoRef
 }
@@ -482,6 +492,30 @@ func (r *RootDefinition) UniqueName(svc *descriptor.ServiceDescriptorProto, rpc 
 	return
 }
 
+func (r *RootDefinition) UniqueNameNoSvcPrefix(svc *descriptor.ServiceDescriptorProto, rpc *descriptor.MethodDescriptorProto) (name string) {
+	rpcOpts := GraphqlMethodOptions(rpc.GetOptions())
+	if rpcOpts != nil && rpcOpts.Name != nil {
+		name = *rpcOpts.Name
+	} else {
+		name = ToLowerFirst(rpc.GetName())
+	}
+
+	originalName := name
+	for uniqueSuffix := 0; ; uniqueSuffix++ {
+		snm, ok := r.reservedNames[name]
+		if !ok {
+			break
+		}
+		if svc == snm.svc && snm.rpc == rpc {
+			return name
+		}
+		name = originalName + strconv.Itoa(uniqueSuffix)
+	}
+
+	r.reservedNames[name] = ServiceAndMethod{svc, rpc}
+	return
+}
+
 func (r *RootDefinition) Methods() []*MethodDescriptor {
 	return r.methods
 }
@@ -509,12 +543,19 @@ func (r *RootDefinition) addMethod(svc *desc.ServiceDescriptor, rpc *desc.Method
 	}
 	r.Parent.Directives[svcDir.Name] = svcDir
 
+	var methodName string
+	if r.Parent.generateServiceMethodPrefixes {
+		methodName = r.UniqueName(svc.AsServiceDescriptorProto(), rpc.AsMethodDescriptorProto())
+	} else {
+		methodName = r.UniqueNameNoSvcPrefix(svc.AsServiceDescriptorProto(), rpc.AsMethodDescriptorProto())
+	}
+
 	m := &MethodDescriptor{
 		ServiceDescriptor: svc,
 		MethodDescriptor:  rpc,
 		FieldDefinition: &ast.FieldDefinition{
 			Description: getDescription(rpc),
-			Name:        r.UniqueName(svc.AsServiceDescriptorProto(), rpc.AsMethodDescriptorProto()),
+			Name:        methodName,
 			Arguments:   args,
 			Type:        objType,
 			Position:    &ast.Position{},

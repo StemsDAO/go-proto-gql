@@ -15,20 +15,25 @@ import (
 
 func main() {
 	var svc = proto.Bool(false)
+	var svcMethodPrefix = proto.Bool(true)
 	var merge = proto.Bool(false)
 	protogen.Options{ParamFunc: func(name, value string) error {
 		switch name {
 		case "svc":
-			if b, err := strconv.ParseBool(value); err != nil {
+			if b, err := strconv.ParseBool(value); err == nil {
 				*svc = b
 			}
+		case "svc_prefix":
+			if b, err := strconv.ParseBool(value); err == nil {
+				*svcMethodPrefix = b
+			}
 		case "merge":
-			if b, err := strconv.ParseBool(value); err != nil {
+			if b, err := strconv.ParseBool(value); err == nil {
 				*merge = b
 			}
 		}
 		return nil
-	}}.Run(Generate(merge, svc))
+	}}.Run(Generate(merge, svc, svcMethodPrefix))
 }
 
 var (
@@ -38,11 +43,11 @@ var (
 	contextPkg = protogen.GoImportPath("context")
 )
 
-func Generate(merge, svc *bool) func(*protogen.Plugin) error {
+func Generate(merge, svc, svcMethodPrefix *bool) func(*protogen.Plugin) error {
 	return func(p *protogen.Plugin) error {
 		p.SupportedFeatures = uint64(pluginpb.CodeGeneratorResponse_FEATURE_PROTO3_OPTIONAL)
 		descs, _ := generator.CreateDescriptorsFromProto(p.Request)
-		schemas, err := generator.NewSchemas(descs, *merge, *svc, p)
+		schemas, err := generator.NewSchemas(descs, *merge, *svc, *svcMethodPrefix, p)
 		if err != nil {
 			return err
 		}
@@ -75,12 +80,23 @@ func Generate(merge, svc *bool) func(*protogen.Plugin) error {
 					}
 
 					methodName := ""
-					switch generator.GetRequestType(rpcOpts, svcOpts) {
-					case gqlpb.Type_QUERY:
-						methodName = schema.GetMutation().UniqueName(file.Proto.Service[svcIndex], file.Proto.Service[svcIndex].Method[rpcIndex])
-					default:
-						methodName = schema.GetMutation().UniqueName(file.Proto.Service[svcIndex], file.Proto.Service[svcIndex].Method[rpcIndex])
+
+					if *svcMethodPrefix {
+						switch generator.GetRequestType(rpcOpts, svcOpts) {
+						case gqlpb.Type_QUERY:
+							methodName = schema.GetMutation().UniqueName(file.Proto.Service[svcIndex], file.Proto.Service[svcIndex].Method[rpcIndex])
+						default:
+							methodName = schema.GetMutation().UniqueName(file.Proto.Service[svcIndex], file.Proto.Service[svcIndex].Method[rpcIndex])
+						}
+					} else {
+						switch generator.GetRequestType(rpcOpts, svcOpts) {
+						case gqlpb.Type_QUERY:
+							methodName = schema.GetMutation().UniqueNameNoSvcPrefix(file.Proto.Service[svcIndex], file.Proto.Service[svcIndex].Method[rpcIndex])
+						default:
+							methodName = schema.GetMutation().UniqueNameNoSvcPrefix(file.Proto.Service[svcIndex], file.Proto.Service[svcIndex].Method[rpcIndex])
+						}
 					}
+
 					methodName = goName(methodName)
 
 					typeIn := g.QualifiedGoIdent(rpc.Input.GoIdent)
@@ -242,10 +258,10 @@ func (o `, msg.GoIdent.GoName, `Resolvers) `, goResolveName(oneof.GoName, oneofO
 	}
 }
 
-//IsEmpty same isEmpty but for mortals
+// IsEmpty same isEmpty but for mortals
 func IsEmpty(o *protogen.Message) bool { return isEmpty(o, generator.NewCallstack()) }
 
-//isEmpty make sure objects are fulled with all objects
+// isEmpty make sure objects are fulled with all objects
 func isEmpty(o *protogen.Message, callstack generator.Callstack) bool {
 	callstack.Push(o)
 	defer callstack.Pop(o)
